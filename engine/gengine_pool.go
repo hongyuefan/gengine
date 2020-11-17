@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"gengine/builder"
 	"gengine/context"
@@ -49,6 +50,76 @@ func (gw *gengineWrapper) clearInjected(keys ...string) {
 		return
 	}
 	gw.rulebuilder.Dc.Del(keys...)
+}
+
+func CompileRuleBuilder( rulesStr string, apiOuter map[string]interface{})([]byte,error) {
+	frb, e := makeRuleBuilder(rulesStr, apiOuter)
+	if e != nil {
+		return nil, e
+	}
+	return json.Marshal(frb)
+}
+
+func NewGenginePoolWithByte(poolMinLen, poolMaxLen int64, em int,rulesStr string, apiOuter map[string]interface{}, jsRule []byte) (*GenginePool, error) {
+
+	if !(0 < poolMinLen && poolMinLen < poolMaxLen) {
+		return nil, errors.New("pool length must be bigger than 0, and poolMaxLen must bigger than poolMinLen")
+	}
+
+	if em != 1 && em != 2 && em != 3 {
+		return nil, errors.New(fmt.Sprintf("exec model must be 1 or 2 or 3), now it is %d", em))
+	}
+
+	v := 0
+	fg := make([]*gengineWrapper, poolMinLen)
+	for i := int64(0); i < poolMinLen; i++ {
+		frb := new(builder.RuleBuilder)
+		e := json.Unmarshal(jsRule,frb)
+		if e != nil {
+			return nil, e
+		}
+		fg[i] = &gengineWrapper{
+			rulebuilder: frb,
+			gengine:     NewGengine(),
+			version:     v,
+			addition:    false,
+		}
+	}
+
+	ag := make([]*gengineWrapper, poolMaxLen-poolMinLen)
+	for j := int64(0); j < poolMaxLen-poolMinLen; j++ {
+		arb := new(builder.RuleBuilder)
+		e := json.Unmarshal(jsRule,arb)
+		if e != nil {
+			return nil, e
+		}
+		ag[j] = &gengineWrapper{
+			rulebuilder: arb,
+			gengine:     NewGengine(),
+			version:     v,
+			addition:    true,
+		}
+	}
+
+	srcRb := new(builder.RuleBuilder)
+	e := json.Unmarshal(jsRule,srcRb)
+	if e != nil {
+		return nil, e
+	}
+
+	p := &GenginePool{
+		ruleBuilder:      srcRb,
+		rStr:             rulesStr,
+		freeGengines:     fg,
+		apis:             apiOuter,
+		execModel:        em,
+		version:          v,
+		additionNum:      poolMaxLen - poolMinLen,
+		additionGengines: ag,
+		clear:            false,
+		max:              poolMaxLen,
+	}
+	return p, nil
 }
 
 //poolLen  -> gengine pool length to init
